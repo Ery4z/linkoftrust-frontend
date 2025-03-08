@@ -1,7 +1,7 @@
 // src/app/explore/page.tsx
 "use client";
 
-import React, { useEffect, useState, useMemo, useRef, use } from "react";
+import React, { useEffect, useState, useMemo, useRef, use, Suspense } from "react";
 import {
     Title,
     TextInput,
@@ -58,8 +58,8 @@ export default function ExplorePage() {
     // State for search mode
     const [searchMode, setSearchMode] = useState<SearchMode>("username");
 
-    const searchParams= useSearchParams();
-    const userParam = searchParams.get("user");	
+    const searchParams = useSearchParams();
+    const userParam = searchParams.get("user");
 
     const CONTRACT_ID = getContractId(network);
 
@@ -220,78 +220,82 @@ export default function ExplorePage() {
     };
 
     return (
-        <div className="">
-            <div className="mx-auto p-4">
-                {/* Left: Trust Graph with Search Bar overlay */}
-                <div className="w-full relative">
-                    {/* Search Bar Overlay */}
-                {wallet && accountId && !myUserData && <CreateProfileButton ref={profileButtonRef}  />}
+        <Suspense fallback={<div>Loading...</div>}>
 
-                    <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 w-full max-w-md bg-opacity-90 p-4 rounded shadow">
-                        <Title order={3} className="text-center mb-4">
-                            Search Users
-                        </Title>
-                        <SearchBar
-                            value={searchInput}
-                            onChange={handleSearchChange}
-                            searchStatus={searchStatus}
-                            network={network}
-                            mode={searchMode}
-                            onModeChange={setSearchMode}
-                        />
+            <div className="">
+                <div className="mx-auto p-4">
+                    {/* Left: Trust Graph with Search Bar overlay */}
+                    <div className="w-full relative">
+                        {/* Search Bar Overlay */}
+                        {wallet && accountId && !myUserData && <CreateProfileButton ref={profileButtonRef} />}
+
+                        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 w-full max-w-md bg-opacity-90 p-4 rounded shadow">
+                            <Title order={3} className="text-center mb-4">
+                                Search Users
+                            </Title>
+                            <SearchBar
+                                value={searchInput}
+                                onChange={handleSearchChange}
+                                searchStatus={searchStatus}
+                                network={network}
+                                mode={searchMode}
+                                onModeChange={setSearchMode}
+                            />
+                        </div>
+                        {/* Trust Graph */}
+                        <SelectedNodeContext.Provider value={{
+                            selectedNodeId: focusUserId
+                            , trustingSelectedNodeId: focusUserId
+                                ? Array.from(users.entries())
+                                    .filter(([userId, userData]) =>
+                                        userData.data.trust_network?.some(([trustedId]) => trustedId === focusUserId)
+                                    )
+                                    .map(([userId]) => userId)
+                                : []
+                            , trustedBySelectedNodeId: focusUserId
+                                ? (users.get(focusUserId)?.data.trust_network ?? []).map(([trustedId]) => trustedId)
+                                : []
+
+                        }}>
+                            <ReactFlowProvider>
+                                <TrustGraph
+                                    trustNetwork={trustGraph || { nodes: {}, edges: [] }}
+                                    selectedNodeId={focusUserId}
+                                    callbackSelectUserId={(userId) => {
+                                        setFocusUserId(userId)
+                                        if (userId) fetchUser(userId, CONTRACT_ID, network).then(() => {
+                                            AddToTrustTree(userId);
+                                        });
+                                    }
+                                    }
+                                />
+                            </ReactFlowProvider>
+                        </SelectedNodeContext.Provider>
                     </div>
-                    {/* Trust Graph */}
-                    <SelectedNodeContext.Provider value={{
-                        selectedNodeId: focusUserId
-                        , trustingSelectedNodeId: focusUserId
-                            ? Array.from(users.entries())
-                                .filter(([userId, userData]) =>
-                                    userData.data.trust_network?.some(([trustedId]) => trustedId === focusUserId)
-                                )
-                                .map(([userId]) => userId)
-                            : []
-                        , trustedBySelectedNodeId: focusUserId
-                            ? (users.get(focusUserId)?.data.trust_network ?? []).map(([trustedId]) => trustedId)
-                            : []
-
-                    }}>
-                        <ReactFlowProvider>
-                            <TrustGraph
-                                trustNetwork={trustGraph || { nodes: {}, edges: [] }}
-                                selectedNodeId={focusUserId}
-                                callbackSelectUserId={(userId) => {
-                                    setFocusUserId(userId)
+                    {/* Right: Profile Card */}
+                    {focusUserId && allUsers.get(focusUserId) && (
+                        <div className="fixed inset-4 z-20 bg-neutral-900 border border-neutral-600 rounded shadow-lg overflow-y-auto
+      lg:absolute lg:inset-auto lg:right-4 lg:top-28 lg:w-4/12"
+                            style={{ maxHeight: "70vh" }}>
+                            <ProfileCard
+                                mainUserId={myUserData ? myUserData?.hashed_user_id || "" : ""}
+                                userData={allUsers.get(focusUserId)!}
+                                trustCallback={() => { }}
+                                trusted={myUserData ? myUserData.trust_network?.map((relation) => {
+                                    return relation[0] == focusUserId;
+                                }).includes(true) || false : undefined}
+                                rebuildGraphCallback={(userId) => {
                                     if (userId) fetchUser(userId, CONTRACT_ID, network).then(() => {
                                         AddToTrustTree(userId);
                                     });
-                                }
-                                }
+                                }}
+                                unselectCallback={() => setFocusUserId(null)}
                             />
-                        </ReactFlowProvider>
-                    </SelectedNodeContext.Provider>
+                        </div>
+                    )}
                 </div>
-                {/* Right: Profile Card */}
-                {focusUserId && allUsers.get(focusUserId) && (
-                    <div className="fixed inset-4 z-20 bg-neutral-900 border border-neutral-600 rounded shadow-lg overflow-y-auto
-      lg:absolute lg:inset-auto lg:right-4 lg:top-28 lg:w-4/12"
-                        style={{ maxHeight: "70vh" }}>
-                        <ProfileCard
-                            mainUserId={myUserData ? myUserData?.hashed_user_id || "" : ""}
-                            userData={allUsers.get(focusUserId)!}
-                            trustCallback={() => { }}
-                            trusted={myUserData ? myUserData.trust_network?.map((relation) => {
-                                return relation[0] == focusUserId;
-                            }).includes(true) || false : undefined}
-                            rebuildGraphCallback={(userId) => {
-                                if (userId) fetchUser(userId, CONTRACT_ID, network).then(() => {
-                                    AddToTrustTree(userId);
-                                });
-                            }}
-                            unselectCallback={() => setFocusUserId(null)}
-                        />
-                    </div>
-                )}
             </div>
-        </div>
+        </Suspense>
+
     );
 }
