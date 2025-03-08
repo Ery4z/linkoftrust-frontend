@@ -1,12 +1,9 @@
 // src/app/explore/page.tsx
 "use client";
 
-import React, { useEffect, useState, useMemo, useRef, use, Suspense } from "react";
-import {
-    Title,
-    TextInput,
-} from "@mantine/core";
-import { notifications, showNotification } from "@mantine/notifications";
+import React, { useEffect, useState, useMemo, useRef, Suspense } from "react";
+import { Title } from "@mantine/core";
+import { notifications } from "@mantine/notifications";
 import {
     pollAllUsers,
     pollMyUser,
@@ -28,14 +25,14 @@ import { useWallet } from "@/context/WalletContext";
 import { useSearchParams } from "next/navigation";
 import { useUserRepository } from "@/context/UserRepositoryContext";
 import { SearchBar, SearchMode } from "@/components/SearchBar";
-import ModalCreateProfile from "@/components/ModalCreateProfile";
-import { create } from "domain";
 import { CreateProfileButton } from "@/components/CreateProfileButton";
-// The contract ID is now set dynamically based on network:
+
+// The contract ID is set dynamically based on network:
 const getContractId = (network: "testnet" | "mainnet") =>
     network === "testnet" ? "linkoftrust.testnet" : "linkoftrust.near";
 
-export default function ExplorePage() {
+// All the logic is moved into ExploreContent:
+function ExploreContent() {
     const { wallet, accountId, network } = useWallet();
     const { users, updateUser, fetchUser } = useUserRepository();
     const [myUserData, setMyUserData] = useState<UserDataView | null>(null);
@@ -43,21 +40,15 @@ export default function ExplorePage() {
     const [message, setMessage] = useState("");
     const [focusUserId, setFocusUserId] = useState<string | null>(null);
     const profileButtonRef = useRef<any>(null);
-    // State for all users
     const [allUserHashed, setAllUserHashed] = useState<string[]>([]);
     const [allUsers, setAllUsers] = useState<Map<string, UserDataView>>(new Map());
-
-    // State for search
     const [searchInput, setSearchInput] = useState("");
     const [searchMatch, setSearchMatch] = useState<UserDataView | null>(null);
     const [searchStatus, setSearchStatus] = useState<"idle" | "loading" | "found" | "not_found">("idle");
-
-    const [createProfileModalOpened, setCreateProfileModalOpened] = useState(false);
-
-
-    // State for search mode
     const [searchMode, setSearchMode] = useState<SearchMode>("username");
 
+    // useSearchParams is now called within this child component,
+    // which is rendered inside a Suspense boundary.
     const searchParams = useSearchParams();
     const userParam = searchParams.get("user");
 
@@ -78,7 +69,6 @@ export default function ExplorePage() {
             if (wallet && accountId) {
                 const myData: UserDataView | null = await pollMyUser(accountId, CONTRACT_ID, network);
                 setMyUserData(myData);
-                console.log("My user data:", myData);
                 if (myData) {
                     localStorage.setItem(`nearid-${myData.hashed_user_id}`, accountId);
                 } else {
@@ -104,20 +94,15 @@ export default function ExplorePage() {
         })();
     }, [CONTRACT_ID, network]);
 
-
-
     // Build initial trust tree for the main user.
     useEffect(() => {
         if (myUserData) {
-            // Show a loading notification during the build process.
-
-            AddToTrustTree(myUserData.hashed_user_id)
+            AddToTrustTree(myUserData.hashed_user_id);
         }
     }, [myUserData]);
 
     // Build the trust network recursively for a given user.
     async function AddToTrustTree(userId: string) {
-        // Pass updateUser callback so that every fetched user's data gets stored in the repository.
         const newGraph = await buildTrustNetworkGraph(
             CONTRACT_ID,
             userId,
@@ -128,36 +113,23 @@ export default function ExplorePage() {
             network,
             updateUser
         );
-
-        // Optionally, fetch additional data for this user and update the repository:
+        // Optionally fetch additional data for this user:
         pollUsers(CONTRACT_ID, [userId], network).then((data) => {
             if (data.size > 0) {
                 setAllUsers((prev) => new Map([...prev, ...data]));
             }
         });
-
         // Merge the new graph with the existing trust graph.
         setTrustGraph((prevGraph) => {
-            console.log("Before merge:", prevGraph);
-            console.log("New graph:", newGraph);
             const mergedGraph = mergeTrustNetworkGraph(prevGraph, newGraph);
-            console.log("After merge:", mergedGraph);
-            return { ...mergedGraph }; // Ensures a new reference
+            return { ...mergedGraph };
         });
     }
-
-
 
     // Debounced search function
     const debouncedSearch = useMemo(
         () =>
             debounce(async (input: string) => {
-                // if (searchMode === "username") {
-                //     // const domainSuffix = network === "mainnet" ? ".near" : ".testnet";
-                //     if (input.toLowerCase().endsWith(domainSuffix)) {
-                //         input = input.slice(0, -domainSuffix.length);
-                //     }
-                // }
                 if (!input) {
                     setSearchMatch(null);
                     setSearchStatus("idle");
@@ -183,7 +155,6 @@ export default function ExplorePage() {
                 if (!matchedUser && searchMode === "username") {
                     const cleanedInput = input.replace(/^[@# ]+|[@# ]+$/g, "");
                     const hashedInput = await hashAccountId(cleanedInput);
-                    console.log("Hashed input:", hashedInput);
                     matchedUser = allUsers.get(hashedInput);
                     if (matchedUser) {
                         localStorage.setItem(`nearid-${hashedInput}`, cleanedInput);
@@ -212,7 +183,6 @@ export default function ExplorePage() {
         [allUsers, searchMode, network]
     );
 
-    // Handle search input change
     const handleSearchChange = (s: string) => {
         const input = s.trim();
         setSearchInput(input);
@@ -220,82 +190,94 @@ export default function ExplorePage() {
     };
 
     return (
-        <Suspense fallback={<div>Loading...</div>}>
-
-            <div className="">
-                <div className="mx-auto p-4">
-                    {/* Left: Trust Graph with Search Bar overlay */}
-                    <div className="w-full relative">
-                        {/* Search Bar Overlay */}
-                        {wallet && accountId && !myUserData && <CreateProfileButton ref={profileButtonRef} />}
-
-                        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 w-full max-w-md bg-opacity-90 p-4 rounded shadow">
-                            <Title order={3} className="text-center mb-4">
-                                Search Users
-                            </Title>
-                            <SearchBar
-                                value={searchInput}
-                                onChange={handleSearchChange}
-                                searchStatus={searchStatus}
-                                network={network}
-                                mode={searchMode}
-                                onModeChange={setSearchMode}
-                            />
-                        </div>
-                        {/* Trust Graph */}
-                        <SelectedNodeContext.Provider value={{
-                            selectedNodeId: focusUserId
-                            , trustingSelectedNodeId: focusUserId
+        <div className="">
+            <div className="mx-auto p-4">
+                {/* Left: Trust Graph with Search Bar overlay */}
+                <div className="w-full relative">
+                    {wallet && accountId && !myUserData && <CreateProfileButton ref={profileButtonRef} />}
+                    <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 w-full max-w-md bg-opacity-90 p-4 rounded shadow">
+                        <Title order={3} className="text-center mb-4">
+                            Search Users
+                        </Title>
+                        <SearchBar
+                            value={searchInput}
+                            onChange={handleSearchChange}
+                            searchStatus={searchStatus}
+                            network={network}
+                            mode={searchMode}
+                            onModeChange={setSearchMode}
+                        />
+                    </div>
+                    <SelectedNodeContext.Provider
+                        value={{
+                            selectedNodeId: focusUserId,
+                            trustingSelectedNodeId: focusUserId
                                 ? Array.from(users.entries())
                                     .filter(([userId, userData]) =>
                                         userData.data.trust_network?.some(([trustedId]) => trustedId === focusUserId)
                                     )
                                     .map(([userId]) => userId)
-                                : []
-                            , trustedBySelectedNodeId: focusUserId
-                                ? (users.get(focusUserId)?.data.trust_network ?? []).map(([trustedId]) => trustedId)
-                                : []
-
-                        }}>
-                            <ReactFlowProvider>
-                                <TrustGraph
-                                    trustNetwork={trustGraph || { nodes: {}, edges: [] }}
-                                    selectedNodeId={focusUserId}
-                                    callbackSelectUserId={(userId) => {
-                                        setFocusUserId(userId)
-                                        if (userId) fetchUser(userId, CONTRACT_ID, network).then(() => {
+                                : [],
+                            trustedBySelectedNodeId: focusUserId
+                                ? (users.get(focusUserId)?.data.trust_network ?? []).map(
+                                    ([trustedId]) => trustedId
+                                )
+                                : [],
+                        }}
+                    >
+                        <ReactFlowProvider>
+                            <TrustGraph
+                                trustNetwork={trustGraph || { nodes: {}, edges: [] }}
+                                selectedNodeId={focusUserId}
+                                callbackSelectUserId={(userId) => {
+                                    setFocusUserId(userId);
+                                    if (userId)
+                                        fetchUser(userId, CONTRACT_ID, network).then(() => {
                                             AddToTrustTree(userId);
                                         });
-                                    }
-                                    }
-                                />
-                            </ReactFlowProvider>
-                        </SelectedNodeContext.Provider>
-                    </div>
-                    {/* Right: Profile Card */}
-                    {focusUserId && allUsers.get(focusUserId) && (
-                        <div className="fixed inset-4 z-20 bg-neutral-900 border border-neutral-600 rounded shadow-lg overflow-y-auto
-      lg:absolute lg:inset-auto lg:right-4 lg:top-28 lg:w-4/12"
-                            style={{ maxHeight: "70vh" }}>
-                            <ProfileCard
-                                mainUserId={myUserData ? myUserData?.hashed_user_id || "" : ""}
-                                userData={allUsers.get(focusUserId)!}
-                                trustCallback={() => { }}
-                                trusted={myUserData ? myUserData.trust_network?.map((relation) => {
-                                    return relation[0] == focusUserId;
-                                }).includes(true) || false : undefined}
-                                rebuildGraphCallback={(userId) => {
-                                    if (userId) fetchUser(userId, CONTRACT_ID, network).then(() => {
+                                }}
+                            />
+                        </ReactFlowProvider>
+                    </SelectedNodeContext.Provider>
+                </div>
+                {/* Right: Profile Card */}
+                {focusUserId && allUsers.get(focusUserId) && (
+                    <div
+                        className="fixed inset-4 z-20 bg-neutral-900 border border-neutral-600 rounded shadow-lg overflow-y-auto
+            lg:absolute lg:inset-auto lg:right-4 lg:top-28 lg:w-4/12"
+                        style={{ maxHeight: "70vh" }}
+                    >
+                        <ProfileCard
+                            mainUserId={myUserData ? myUserData.hashed_user_id || "" : ""}
+                            userData={allUsers.get(focusUserId)!}
+                            trustCallback={() => { }}
+                            trusted={
+                                myUserData
+                                    ? myUserData.trust_network
+                                        ?.map((relation) => relation[0] === focusUserId)
+                                        .includes(true) || false
+                                    : undefined
+                            }
+                            rebuildGraphCallback={(userId) => {
+                                if (userId)
+                                    fetchUser(userId, CONTRACT_ID, network).then(() => {
                                         AddToTrustTree(userId);
                                     });
-                                }}
-                                unselectCallback={() => setFocusUserId(null)}
-                            />
-                        </div>
-                    )}
-                </div>
+                            }}
+                            unselectCallback={() => setFocusUserId(null)}
+                        />
+                    </div>
+                )}
             </div>
-        </Suspense>
+        </div>
+    );
+}
 
+// The top-level ExplorePage now only wraps ExploreContent in a Suspense boundary.
+export default function ExplorePage() {
+    return (
+        <Suspense fallback={<div>Loading...</div>}>
+            <ExploreContent />
+        </Suspense>
     );
 }
